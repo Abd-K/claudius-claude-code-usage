@@ -56,6 +56,7 @@ BACKOFF_MAX_SECONDS = 30 * 60
 # token-refresh path and the auto-anchor path.
 REFRESH_GUARD_SECONDS = 30 * 60
 ANCHOR_GUARD_SECONDS = 30 * 60
+ANCHOR_RETRY_SECONDS = 2 * 60
 # Prompt-cache lifetime we assume for keep-alive. Past this a session is cold and
 # we refuse to warm it — resurrecting a dead cache is a full re-read for nothing.
 CACHE_WARM_TTL = 60 * 60
@@ -1111,22 +1112,30 @@ def run_anchor(force, json_out):
         if raw is None:
             done("error", f"can't read usage ({token_status})", 2)
         sess = session_window(raw)
-        # A present session entry with a future reset and nonzero usage means the
-        # window is already open; anchoring again would waste a probe.
+        # A future reset means the window is open, even when its tiny first
+        # request still rounds to 0% usage.
         if sess is not None and sess.get("resets_at"):
             rs = parse_iso(sess["resets_at"])
-            if rs and (rs - now_utc()).total_seconds() > 0 and (sess.get("percent") or 0) > 0:
+            if rs and (rs - now_utc()).total_seconds() > 0:
                 done("skipped", f"5h limit already running, {format_reset(sess)}", 3,
                      {"session_percent": sess.get("percent")})
         last = state.get("last_anchor_attempt", 0)
-        if now_utc().timestamp() - last < ANCHOR_GUARD_SECONDS:
-            wait = int(ANCHOR_GUARD_SECONDS - (now_utc().timestamp() - last))
+        guard = ANCHOR_RETRY_SECONDS if state.get("last_anchor_failed") else ANCHOR_GUARD_SECONDS
+        if now_utc().timestamp() - last < guard:
+            wait = int(guard - (now_utc().timestamp() - last))
             done("skipped", f"anchored recently, wait {wait // 60}m", 4)
 
     state["last_anchor_attempt"] = now_utc().timestamp()
+    state["last_anchor_failed"] = False
     save_state(state)
     ok, message = run_claude_probe()
     if not ok:
+        # Match the app's first retry while retaining a short anti-spam guard.
+        # Reload to preserve credential updates made during the request.
+        state = load_state()
+        state["last_anchor_attempt"] = now_utc().timestamp()
+        state["last_anchor_failed"] = True
+        save_state(state)
         done("error", message, 5)
     done("sent", "5h limit refreshed via tiny cheapest-model request", 0)
 
