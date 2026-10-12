@@ -48,7 +48,7 @@ final class UsageModel: ObservableObject {
     /// Until this time an attempt could only be refused by the CLI's guard, so
     /// the 2-minute poll holds off instead of spending a usage read per tick.
     private var anchorHoldUntil: Date?
-    private static let cliPath = NSHomeDirectory() + "/.local/bin/claude-usage"
+    private static var cliPath: String { Backend.path }
 
     /// `live: false` builds a model that never polls, anchors or alerts — for
     /// rendering the panel from fixed data (scripts/snapshot.sh).

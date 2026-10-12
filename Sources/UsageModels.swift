@@ -148,6 +148,18 @@ extension UsageWindow {
     }
 }
 
+/// Where the claude-usage backend lives: ~/.local/bin for a source install,
+/// Homebrew's bin for a brew one. Checked on each use, so installing it while
+/// the app runs needs no relaunch.
+enum Backend {
+    static var path: String {
+        let candidates = [NSHomeDirectory() + "/.local/bin/claude-usage",
+                          "/opt/homebrew/bin/claude-usage",
+                          "/usr/local/bin/claude-usage"]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) } ?? candidates[0]
+    }
+}
+
 /// Shared time formatting for the panel and alerts.
 enum Fmt {
     /// The absolute reset moment: clock time if it's within a day ("3:15 PM"),

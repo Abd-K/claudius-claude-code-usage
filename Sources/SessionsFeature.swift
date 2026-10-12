@@ -91,7 +91,7 @@ final class SessionsModel: ObservableObject {
     /// The stub lands at or just before the moment we stamp, so the window only has
     /// to absorb clock skew and the CLI's whole-second ages.
     private static let warmGrace: TimeInterval = 60
-    private static let cliPath = NSHomeDirectory() + "/.local/bin/claude-usage"
+    private static var cliPath: String { Backend.path }
 
     /// `live: false` skips scanning and keep-alive (see UsageModel's).
     init(live: Bool = true) {
