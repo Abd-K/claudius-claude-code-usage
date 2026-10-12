@@ -6,6 +6,7 @@
   <img src="https://img.shields.io/badge/macOS-13%2B-black?logo=apple" alt="macOS 13+">
   <img src="https://img.shields.io/badge/SwiftUI-native-orange?logo=swift&logoColor=white" alt="Native SwiftUI">
   <img src="https://img.shields.io/badge/data-100%25%20local-2ea44f" alt="100% local">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT license"></a>
   <a href="https://github.com/Abd-K/Claudius/releases"><img src="https://img.shields.io/github/v/release/Abd-K/Claudius?color=blue" alt="Latest release"></a>
   <a href="https://github.com/Abd-K/Claudius/stargazers"><img src="https://img.shields.io/github/stars/Abd-K/Claudius?style=flat&color=yellow" alt="GitHub stars"></a>
 </p>
@@ -139,6 +140,10 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ark.claude-usage.pli
 Issues and PRs welcome. `scripts/snapshot.sh` regenerates every screenshot in this README from demo data, so UI changes can ship with fresh images.
 
 If Claudius saves you from a surprise rate limit, a ⭐ helps other Claude Code users find it.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ## Keywords
 
