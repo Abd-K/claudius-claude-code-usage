@@ -19,6 +19,19 @@ final class UsageModel: ObservableObject {
             scheduleAutoAnchor()
         }
     }
+    @Published var menuBarStyle = MenuBarStyle(
+        rawValue: UserDefaults.standard.string(forKey: "menuBarStyle") ?? "") ?? .badges {
+        didSet { UserDefaults.standard.set(menuBarStyle.rawValue, forKey: "menuBarStyle") }
+    }
+    /// Low / reached / back alerts. On by default: they're the reason to keep a
+    /// limit watcher running at all.
+    @Published var alerts = (UserDefaults.standard.object(forKey: "alerts") as? Bool) ?? true {
+        didSet {
+            UserDefaults.standard.set(alerts, forKey: "alerts")
+            if alerts { Notifier.shared.requestAccess() }
+        }
+    }
+    let history: UsageHistory
     /// Seconds after a window's reset to fire the next anchor.
     private let anchorDelayAfterReset: TimeInterval = 60
     /// Mirrors the CLI's own anchor guard: once it has attempted a probe, no
@@ -37,7 +50,12 @@ final class UsageModel: ObservableObject {
     private var anchorHoldUntil: Date?
     private static let cliPath = NSHomeDirectory() + "/.local/bin/claude-usage"
 
-    init() {
+    /// `live: false` builds a model that never polls, anchors or alerts — for
+    /// rendering the panel from fixed data (scripts/snapshot.sh).
+    init(live: Bool = true, history: UsageHistory = UsageHistory()) {
+        self.history = history
+        guard live else { return }
+        Notifier.shared.start(requestingAccess: alerts)
         fetch()
         timer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { [weak self] _ in
             self?.fetch()
@@ -63,16 +81,22 @@ final class UsageModel: ObservableObject {
         if autoAnchor && openSessionWindow == nil { maybeAutoAnchor() }
     }
 
-    // --- Menu bar icon: session circle + weekly circle + weekly-pace arrow ---
+    // --- Menu bar item: the two limits in the chosen style + weekly-pace arrow ---
 
     private var sessionWindow: UsageWindow? { windows.first { $0.name == "session" } }
     private var weeklyWindow: UsageWindow? { windows.first { $0.name == "weekly" } }
 
-    private func leftPercent(_ w: UsageWindow) -> Double? { w.left ?? w.percent.map { 100 - $0 } }
+    /// The 5h or weekly limit that's currently blocking you, and when the last of
+    /// them lifts — the moment you can work again.
+    var limitedUntil: Date? {
+        let blocking = windows.filter { $0.isPrimary && $0.blocked }
+        guard !blocking.isEmpty else { return nil }
+        return blocking.compactMap(\.resetDate).max() ?? .distantFuture
+    }
 
-    /// Circle fill + inside-number color, from the same urgency scale as the bars
+    /// Badge fill + inside-number color, from the same urgency scale as the panel
     /// (magnitude adjusted for time-to-reset).
-    private func circleColors(_ w: UsageWindow?) -> (fill: NSColor, text: NSColor) {
+    private static func badgeColors(_ w: UsageWindow?) -> (fill: NSColor, text: NSColor) {
         guard let w else { return (.systemGray, .white) }
         switch w.urgencyLevel {
         case 0: return (.systemGreen, .white)
@@ -82,9 +106,9 @@ final class UsageModel: ObservableObject {
         }
     }
 
-    /// The % left drawn inside a circle ("–" when the window is absent).
-    private func circleLabel(_ w: UsageWindow?) -> String {
-        guard let w, let l = leftPercent(w) else { return "–" }
+    /// The % left as a bare number ("–" when the window is absent).
+    private static func label(_ w: UsageWindow?) -> String {
+        guard let w, let l = w.leftPercent else { return "–" }
         return String(Int(l.rounded()))
     }
 
@@ -106,47 +130,106 @@ final class UsageModel: ObservableObject {
     /// Draws one badge (diameter d) at x with the window's % left inside — an oval
     /// when `rounded` is false (session), a rounded square when true (weekly), so
     /// the two are distinguishable at a glance.
-    private func drawCircle(_ w: UsageWindow?, at x: CGFloat, d: CGFloat, rounded: Bool) {
-        let (fill, textColor) = circleColors(w)
+    private static func drawBadge(_ w: UsageWindow?, at x: CGFloat, d: CGFloat, rounded: Bool) {
+        let (fill, textColor) = badgeColors(w)
         fill.setFill()
         let rect = NSRect(x: x + 2, y: 2, width: d - 4, height: d - 4)
         (rounded ? NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
                  : NSBezierPath(ovalIn: rect)).fill()
-        let label = circleLabel(w)
+        let text = label(w)
         let para = NSMutableParagraphStyle(); para.alignment = .center
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: label.count > 2 ? 8 : 10, weight: .bold),
+            .font: NSFont.systemFont(ofSize: text.count > 2 ? 8 : 10, weight: .bold),
             .foregroundColor: textColor,
             .paragraphStyle: para,
         ]
-        let ts = label.size(withAttributes: attrs)
-        label.draw(in: NSRect(x: x, y: (d - ts.height) / 2, width: d, height: ts.height),
-                   withAttributes: attrs)
+        let ts = text.size(withAttributes: attrs)
+        text.draw(in: NSRect(x: x, y: (d - ts.height) / 2, width: d, height: ts.height),
+                  withAttributes: attrs)
     }
 
-    /// Menu-bar icon: session circle (left) + weekly circle (right) + weekly-pace
-    /// arrow. Non-template so the colors render.
+    /// Two concentric fuel rings: outer = 5-hour left, inner = weekly left.
+    private static func drawRings(_ s: UsageWindow?, _ w: UsageWindow?, in r: NSRect) {
+        let center = NSPoint(x: r.midX, y: r.midY)
+        let line: CGFloat = 2.4
+        let outer = r.width / 2 - line / 2
+        for (win, radius) in [(s, outer), (w, outer - line - 1.6)] {
+            let track = NSBezierPath()
+            track.appendArc(withCenter: center, radius: radius, startAngle: 0, endAngle: 360)
+            track.lineWidth = line
+            NSColor.labelColor.withAlphaComponent(0.22).setStroke()
+            track.stroke()
+            guard let win, let left = win.leftPercent, left > 0 else { continue }
+            let arc = NSBezierPath()
+            arc.appendArc(withCenter: center, radius: radius, startAngle: 90,
+                          endAngle: 90 - 360 * min(1, left / 100), clockwise: true)
+            arc.lineWidth = line
+            arc.lineCapStyle = .round
+            badgeColors(win).fill.setStroke()
+            arc.stroke()
+        }
+    }
+
+    /// "● 80  ■ 97": a colored mark (circle = 5-hour, square = weekly, as on the
+    /// badges) before each number, the numbers in the menu bar's own text color.
+    private static func numbersText(_ s: UsageWindow?, _ w: UsageWindow?) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let num: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor.labelColor,
+        ]
+        for (i, (win, mark)) in [(s, "●"), (w, "■")].enumerated() {
+            if i > 0 { out.append(NSAttributedString(string: "  ", attributes: num)) }
+            out.append(NSAttributedString(string: mark + " ", attributes: [
+                .font: NSFont.systemFont(ofSize: 9),
+                .foregroundColor: badgeColors(win).fill,
+                .baselineOffset: 1,
+            ]))
+            out.append(NSAttributedString(string: label(win), attributes: num))
+        }
+        return out
+    }
+
+    /// The menu-bar item in the chosen style, plus the weekly-pace arrow. Drawn on
+    /// demand so the label-colored parts follow the menu bar's light or dark look.
+    /// Non-template so the colors render.
     var menuBarImage: NSImage {
-        let d: CGFloat = 22
-        let gap: CGFloat = 3
+        let s = sessionWindow, w = weeklyWindow
+        let h: CGFloat = 22
         let arrow = weeklyArrowSpec
-        var arrowAttrs: [NSAttributedString.Key: Any] = [:]
-        var arrowSize = NSSize.zero
-        if let a = arrow {
-            arrowAttrs = [.font: NSFont.systemFont(ofSize: 12, weight: .heavy),
-                          .foregroundColor: a.color]
-            arrowSize = a.glyph.size(withAttributes: arrowAttrs)
-        }
+        let arrowAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .heavy),
+            .foregroundColor: arrow?.color ?? NSColor.clear,
+        ]
+        let arrowSize = arrow.map { $0.glyph.size(withAttributes: arrowAttrs) } ?? .zero
         let arrowW: CGFloat = arrow == nil ? 0 : arrowSize.width + 1
-        let img = NSImage(size: NSSize(width: d + gap + d + arrowW, height: d))
-        img.lockFocus()
-        drawCircle(sessionWindow, at: 0, d: d, rounded: false)      // session = circle
-        drawCircle(weeklyWindow, at: d + gap, d: d, rounded: true)  // weekly = rounded square
-        if let a = arrow {
-            a.glyph.draw(at: NSPoint(x: d + gap + d + 1, y: (d - arrowSize.height) / 2),
-                         withAttributes: arrowAttrs)
+
+        let width: CGFloat
+        let draw: () -> Void
+        switch menuBarStyle {
+        case .badges:
+            width = 22 + 3 + 22
+            draw = {
+                Self.drawBadge(s, at: 0, d: 22, rounded: false)    // session = circle
+                Self.drawBadge(w, at: 25, d: 22, rounded: true)    // weekly = rounded square
+            }
+        case .rings:
+            width = 20
+            draw = { Self.drawRings(s, w, in: NSRect(x: 0, y: 1, width: 20, height: 20)) }
+        case .numbers:
+            let text = Self.numbersText(s, w)
+            let size = text.size()
+            width = ceil(size.width) + 2
+            draw = { text.draw(at: NSPoint(x: 1, y: (h - size.height) / 2)) }
         }
-        img.unlockFocus()
+        let img = NSImage(size: NSSize(width: width + arrowW, height: h), flipped: false) { _ in
+            draw()
+            if let a = arrow {
+                a.glyph.draw(at: NSPoint(x: width + 1, y: (h - arrowSize.height) / 2),
+                             withAttributes: arrowAttrs)
+            }
+            return true
+        }
         img.isTemplate = false
         return img
     }
@@ -167,7 +250,7 @@ final class UsageModel: ObservableObject {
                 switch result {
                 case .success(let out):
                     let now = Date()
-                    self.windows = out.windows.map {
+                    let fresh = out.windows.map {
                         UsageWindow(
                             name: $0.name,
                             percent: $0.percent,
@@ -175,6 +258,9 @@ final class UsageModel: ObservableObject {
                             resetDate: $0.resets_in_seconds.map { now.addingTimeInterval(Double($0)) },
                             blocked: $0.blocked)
                     }
+                    self.history.record(fresh, at: now)
+                    if self.alerts { Notifier.shared.compare(old: self.windows, new: fresh) }
+                    self.windows = fresh
                     self.updatedAt = now
                     self.error = nil
                     self.needsSignIn = false

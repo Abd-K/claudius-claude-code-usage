@@ -93,7 +93,9 @@ final class SessionsModel: ObservableObject {
     private static let warmGrace: TimeInterval = 60
     private static let cliPath = NSHomeDirectory() + "/.local/bin/claude-usage"
 
-    init() {
+    /// `live: false` skips scanning and keep-alive (see UsageModel's).
+    init(live: Bool = true) {
+        guard live else { return }
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 90, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -281,19 +283,15 @@ final class SessionsModel: ObservableObject {
 // MARK: - Views
 
 /// Thin fuel-gauge bar for cache warmth — no threshold ticks (those are a
-/// magnitude concept; warmth is just "time left in the window").
+/// magnitude concept; warmth is just "time left in the window"). Turns orange in
+/// the last quarter-hour, when there's still time to act on it.
 private struct WarmthBar: View {
-    let fraction: Double  // remaining warmth, 0…1
-    let warm: Bool
+    let session: CacheSession
+    private var tint: Color {
+        !session.isWarm ? .gray : (session.minutesLeft < 15 ? .orange : .green)
+    }
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.primary.opacity(0.12))
-                Capsule().fill(warm ? Color.green : Color.gray)
-                    .frame(width: max(3, geo.size.width * fraction))
-            }
-        }
-        .frame(height: 6)
+        FuelBar(fraction: session.warmFraction, tint: tint, height: 4)
     }
 }
 
@@ -308,10 +306,17 @@ private struct SessionRow: View {
     private var abandoned: Bool { warms >= SessionsModel.unusedWarmLimit }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Text(session.title).fontWeight(.medium).lineLimit(1).truncationMode(.tail)
+                Text(session.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
+                Text(session.isWarm ? "\(session.minutesLeft)m" : "cold")
+                    .font(.caption).monospacedDigit()
+                    .foregroundStyle(session.isWarm && session.minutesLeft < 15 ? Color.orange : Color.secondary)
+                    .help(session.isWarm ? "Cache stays warm for ~\(session.minutesLeft)m more"
+                                         : "Cache expired — resuming re-reads the whole context")
                 Button { model.toggleKeepAlive(session.id) } label: {
                     Image(systemName: keepOn ? "flame.fill" : "flame")
                         .foregroundStyle(keepOn ? (abandoned ? Color.red : Color.orange) : Color.secondary)
@@ -321,7 +326,7 @@ private struct SessionRow: View {
                              : "Keep this session's cache warm")
                 Button { model.sendKeepAlive(session.id, manual: true) } label: {
                     if model.busyID == session.id {
-                        ProgressView().controlSize(.small)
+                        ProgressView().controlSize(.mini).frame(width: 14, height: 14)
                     } else {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -332,16 +337,12 @@ private struct SessionRow: View {
                       ? "Refresh now — re-reads this session's context to extend its live cache (uses quota)"
                       : "Cold — won't refresh; warming a dead cache is a full re-read for nothing")
             }
-            WarmthBar(fraction: session.warmFraction, warm: session.isWarm)
-            HStack(spacing: 4) {
-                Text(session.isWarm ? "~\(session.minutesLeft)m left" : "expired")
-                    .font(.caption).foregroundStyle(.secondary)
-                if abandoned {
-                    Text("· refreshed \(warms)× unused")
-                        .font(.caption).foregroundStyle(Color.red)
-                        .lineLimit(1).truncationMode(.tail)
-                        .help("Kept warm through \(warms) refreshes since you last worked here — each one spends quota. Turn keep-warm off if you're done with it.")
-                }
+            WarmthBar(session: session)
+            if abandoned {
+                Text("refreshed \(warms)× unused")
+                    .font(.caption).foregroundStyle(Color.red)
+                    .lineLimit(1).truncationMode(.tail)
+                    .help("Kept warm through \(warms) refreshes since you last worked here — each one spends quota. Turn keep-warm off if you're done with it.")
             }
         }
         // Only the flagged card gets a surround; an untouched row keeps the plain
@@ -404,76 +405,85 @@ struct SessionsSection: View {
 
     var body: some View {
         if !model.sessions.isEmpty {
-            Divider()
-            HStack {
-                Text("Sessions").font(.headline)
-                Spacer()
-                Text(model.sessions.contains { model.keepAliveIDs.contains($0.id) }
-                     ? "kept warm first" : "nearest to expiry")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            TimelineView(.periodic(from: .now, by: 30)) { ctx in
-                let all = ordered(at: ctx.date)
-                let shown = model.showAllSessions ? all : Array(all.prefix(Self.collapsed))
-                let rows = VStack(spacing: 9) {
-                    ForEach(shown) { SessionRow(session: $0, model: model) }
-                }
-                .background(GeometryReader { g in
-                    Color.clear.preference(key: ListHeightKey.self, value: g.size.height)
-                })
-                // Expanded, the list scrolls rather than growing the popover, which has
-                // no scroll view of its own. The frame must be a *definite* height: a
-                // ScrollView has no intrinsic height, so a bare maxHeight collapses it to
-                // nothing and expanding looks like it hid the list. Fall back to the cap
-                // until the first measurement lands.
-                if model.showAllSessions {
-                    ScrollView {
-                        rows.frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(height: min(listHeight > 0 ? listHeight : Self.expandedMaxHeight,
-                                       Self.expandedMaxHeight))
-                } else {
-                    rows
-                }
-                if all.count > Self.collapsed {
-                    Button { model.showAllSessions.toggle() } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: model.showAllSessions ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 9))
-                            Text(model.showAllSessions
-                                 ? "Show fewer"
-                                 : "Show all \(all.count) · \(all.count - Self.collapsed) hidden")
-                                .font(.caption)
-                            Spacer()
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                }
-            }
-            .onPreferenceChange(ListHeightKey.self) { listHeight = $0 }
-            if let r = model.lastResult {
-                Text(r).font(.caption)
-                    .foregroundStyle(r.hasPrefix("sent") || r.hasPrefix("skipped") ? Color.secondary : Color.orange)
-                    .lineLimit(1).truncationMode(.tail)
-            }
-
-            Button {
-                model.showCosts.toggle()
-                if model.showCosts { model.loadCosts() }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: model.showCosts ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9))
-                    Text(model.showCosts ? "Hide consumption" : "Show consumption")
-                        .font(.caption)
+            Card(spacing: 8) {
+                HStack(spacing: 6) {
+                    Text("Sessions").font(.system(size: 12, weight: .semibold))
+                    Text("\(model.sessions.filter(\.isWarm).count) warm")
+                        .font(.caption2.weight(.medium)).monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.primary.opacity(0.08)))
                     Spacer()
                 }
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+                .help(model.sessions.contains { model.keepAliveIDs.contains($0.id) }
+                      ? "Prompt-cache warmth · kept-warm sessions first, then nearest to expiry"
+                      : "Prompt-cache warmth · nearest to expiry first")
+                TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                    let all = ordered(at: ctx.date)
+                    let shown = model.showAllSessions ? all : Array(all.prefix(Self.collapsed))
+                    let rows = VStack(spacing: 9) {
+                        ForEach(shown) { SessionRow(session: $0, model: model) }
+                    }
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: ListHeightKey.self, value: g.size.height)
+                    })
+                    // Expanded, the list scrolls rather than growing the popover, which has
+                    // no scroll view of its own. The frame must be a *definite* height: a
+                    // ScrollView has no intrinsic height, so a bare maxHeight collapses it to
+                    // nothing and expanding looks like it hid the list. Fall back to the cap
+                    // until the first measurement lands.
+                    if model.showAllSessions {
+                        ScrollView {
+                            rows.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(height: min(listHeight > 0 ? listHeight : Self.expandedMaxHeight,
+                                           Self.expandedMaxHeight))
+                    } else {
+                        rows
+                    }
+                    if all.count > Self.collapsed {
+                        Button { model.showAllSessions.toggle() } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: model.showAllSessions ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 9))
+                                Text(model.showAllSessions
+                                     ? "Show fewer"
+                                     : "Show all \(all.count) · \(all.count - Self.collapsed) hidden")
+                                    .font(.caption)
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                .onPreferenceChange(ListHeightKey.self) { listHeight = $0 }
+                if let r = model.lastResult {
+                    Text(r).font(.caption)
+                        .foregroundStyle(r.hasPrefix("sent") || r.hasPrefix("skipped") ? Color.secondary : Color.orange)
+                        .lineLimit(1).truncationMode(.tail)
+                }
 
-            if model.showCosts { ConsumptionList(model: model) }
+                Divider()
+
+                Button {
+                    model.showCosts.toggle()
+                    if model.showCosts { model.loadCosts() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: model.showCosts ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9))
+                        Text("Consumption")
+                            .font(.caption.weight(.medium))
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Which sessions used the most of your allowance")
+
+                if model.showCosts { ConsumptionList(model: model) }
+            }
         }
     }
 }

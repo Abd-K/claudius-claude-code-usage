@@ -64,7 +64,7 @@ struct UsageWindow: Identifiable {
         return level
     }
 
-    /// Fill color from urgency (same scale used by the menu-bar badges).
+    /// Gauge color from urgency (same scale used by the menu-bar badges).
     var fillColor: Color {
         switch urgencyLevel {
         case 0: return .green
@@ -95,14 +95,95 @@ struct UsageWindow: Identifiable {
         if perDay < 10 { return ("↓", .blue) }
         return ("•", .secondary)
     }
+}
 
-    /// The on-pace corridor as bar fractions: below `lower` you're behind (↓),
-    /// above `upper` you're ahead (↑). Slides right as the week elapses. nil for
-    /// the session (which shows the fixed color ticks instead).
-    var paceCorridor: (lower: Double, upper: Double)? {
-        guard name != "session" else { return nil }
-        let days = max(0.5, elapsedFraction * 7)
-        return (min(1, 0.10 * days), min(1, 0.20 * days))
+// MARK: - Forecasts
+
+extension UsageWindow {
+    var displayName: String {
+        switch name {
+        case "session": return "5-hour"
+        case "weekly": return "Weekly"
+        default: return name.capitalized
+        }
+    }
+
+    /// Percent of the limit still available, 0…100.
+    var leftPercent: Double? { left ?? percent.map { 100 - $0 } }
+
+    /// The 5h and weekly limits gate everything; a model-scoped one only gates
+    /// that model, so it shouldn't paint the whole panel as limited.
+    var isPrimary: Bool { name == "session" || name == "weekly" }
+
+    /// When this window began: its reset minus its length.
+    var windowStart: Date? { resetDate.map { $0.addingTimeInterval(-duration) } }
+
+    /// Fraction of the window's time still to run (1 = just began, 0 = resetting).
+    /// nil when no window is open, since there's no clock running to compare against.
+    var timeLeftFraction: Double? {
+        guard let reset = resetDate, !sessionIdle else { return nil }
+        return max(0, min(1, reset.timeIntervalSinceNow / duration))
+    }
+
+    /// When the limit runs dry at the average rate so far — only when that lands
+    /// before the reset, since otherwise there's nothing to warn about. Held back
+    /// until a tenth of the window has passed and 5% is used: earlier than that a
+    /// single burst reads as a runaway rate.
+    func runOutDate(at now: Date = Date()) -> Date? {
+        guard !blocked, !sessionIdle, let used = percent, used >= 5, used < 100,
+              let reset = resetDate, let start = windowStart else { return nil }
+        let elapsed = now.timeIntervalSince(start)
+        guard elapsed >= duration * 0.1 else { return nil }
+        let out = now.addingTimeInterval((100 - used) / (used / elapsed))
+        return out < reset ? out : nil
+    }
+
+    /// An even share of what's left for each day until the reset (weekly windows).
+    /// The last day gets the whole remainder rather than a multiple of it.
+    var dailyBudget: Double? {
+        guard name != "session", let left = leftPercent, let reset = resetDate else { return nil }
+        let days = reset.timeIntervalSinceNow / 86_400
+        guard days > 0 else { return nil }
+        return left / max(1, days)
+    }
+}
+
+/// Shared time formatting for the panel and alerts.
+enum Fmt {
+    /// The absolute reset moment: clock time if it's within a day ("3:15 PM"),
+    /// otherwise weekday + time ("Sat 8:00 AM") so multi-day windows are unambiguous.
+    static func clock(_ d: Date) -> String {
+        if d.timeIntervalSinceNow < 24 * 3600 {
+            return d.formatted(date: .omitted, time: .shortened)
+        }
+        return d.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+    }
+
+    static func human(_ interval: TimeInterval) -> String {
+        let s = max(0, Int(interval))
+        let d = s / 86_400
+        let h = (s % 86_400) / 3_600
+        let m = (s % 3_600) / 60
+        if d > 0 { return "\(d)d \(h)h" }
+        if h > 0 { return "\(h)h \(String(format: "%02d", m))m" }
+        return "\(m)m"
+    }
+
+    static func percent(_ v: Double) -> String {
+        v > 0 && v < 1 ? String(format: "%.1f%%", v) : "\(Int(v.rounded()))%"
+    }
+}
+
+/// How the menu-bar item draws the two limits.
+enum MenuBarStyle: String, CaseIterable, Identifiable {
+    case badges, rings, numbers
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .badges: return "Badges"
+        case .rings: return "Rings"
+        case .numbers: return "Numbers"
+        }
     }
 }
 

@@ -82,7 +82,7 @@ final class DockController: NSObject, ObservableObject, NSWindowDelegate {
     func showWindow() {
         guard showInDock, let content else { return }
         if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 400),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 520),
                              styleMask: [.titled, .closable, .miniaturizable],
                              backing: .buffered, defer: false)
             w.title = "Claude usage"
