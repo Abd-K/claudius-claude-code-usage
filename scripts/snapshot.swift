@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ImageIO
 
 /// Renders the README screenshots from fixed demo data, so they never show live
 /// usage or real session names. Built and run by snapshot.sh, which compiles this
@@ -32,16 +33,22 @@ enum Snapshot {
         snap(Demo.menuBar(healthy), dark: true, to: out.appendingPathComponent("menubar.png"))
         snap(Demo.socialPreview(healthy), dark: true, framed: false,
              to: out.appendingPathComponent("social-preview.png"))
+        Reel.write(to: out.appendingPathComponent("demo.gif"))
     }
 
     /// Draws a view on a popover-like card and writes it as a PNG.
     @MainActor static func snap<V: View>(_ view: V, dark: Bool, framed: Bool = true, to url: URL) {
-        let card = view
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: NSColor(white: dark ? 0.16 : 0.965, alpha: framed ? 1 : 0))))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(framed ? (dark ? 0.18 : 0.10) : 0), lineWidth: 0.5))
-        let host = NSHostingView(rootView: card)
+        guard let rep = render(view.modifier(PopoverCard(dark: dark, visible: framed)), dark: dark)
+        else { return }
+        try? rep.representation(using: .png, properties: [:])?.write(to: url)
+        print("wrote \(url.lastPathComponent) \(rep.pixelsWide)x\(rep.pixelsHigh)")
+    }
+
+    /// Renders a view offscreen at a fixed scale — 2x by default, whatever screen
+    /// this runs on, so the README stays sharp.
+    @MainActor static func render<V: View>(_ view: V, dark: Bool, scale: CGFloat = 2,
+                                           settle: TimeInterval = 0.5) -> NSBitmapImageRep? {
+        let host = NSHostingView(rootView: view)
         let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         host.appearance = appearance
         let size = host.fittingSize
@@ -52,18 +59,29 @@ enum Snapshot {
         window.appearance = appearance
         window.contentView = host
         window.orderFront(nil)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        RunLoop.main.run(until: Date().addingTimeInterval(settle))
         host.layoutSubtreeIfNeeded()
         defer { window.orderOut(nil) }
-        // Always 2x, whatever screen this runs on, so the README stays sharp.
         guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil, pixelsWide: Int(size.width * 2), pixelsHigh: Int(size.height * 2),
+            bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
         rep.size = size
         host.cacheDisplay(in: host.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: url)
-        print("wrote \(url.lastPathComponent) \(rep.pixelsWide)x\(rep.pixelsHigh)")
+        return rep
+    }
+}
+
+/// The popover's own look: a rounded dark or light card with a hairline edge.
+struct PopoverCard: ViewModifier {
+    let dark: Bool
+    var visible = true
+    func body(content: Content) -> some View {
+        content
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: NSColor(white: dark ? 0.16 : 0.965, alpha: visible ? 1 : 0))))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(visible ? (dark ? 0.18 : 0.10) : 0), lineWidth: 0.5))
     }
 }
 
@@ -193,5 +211,135 @@ enum Snapshot {
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
+    }
+}
+
+// MARK: - Demo reel
+
+/// The README's animated demo: limits draining toward a forecast, the low alert,
+/// the limited banner, the limit coming back, then the three menu-bar styles.
+@MainActor enum Reel {
+    typealias Point = (session: Double, sessionReset: TimeInterval, weekly: Double,
+                       weeklyReset: TimeInterval, fable: Double)
+    static let healthy: Point = (38, 2 * 3600 + 14 * 60, 29, 4 * 86_400 + 17 * 3600, 12)
+    static let tight: Point = (86, 2 * 3600 + 4 * 60, 62, 3 * 86_400 + 9 * 3600, 41)
+    static let limited: Point = (100, 47 * 60, 78, 2 * 86_400 + 6 * 3600, 55)
+    static let back: Point = (0, 5 * 3600, 79, 2 * 86_400 + 5 * 3600, 55)
+
+    static func mix(_ a: Point, _ b: Point, _ t: Double) -> Point {
+        func m(_ x: Double, _ y: Double) -> Double { x + (y - x) * t }
+        return (m(a.0, b.0), m(a.1, b.1), m(a.2, b.2), m(a.3, b.3), m(a.4, b.4))
+    }
+
+    static func usage(_ p: Point, blocked: Bool = false) -> Demo.Usage {
+        Demo.usage(session: (p.session.rounded(), p.sessionReset), weekly: (p.weekly.rounded(), p.weeklyReset),
+                   fable: p.fable.rounded(), sessionBlocked: blocked)
+    }
+
+    static func write(to url: URL) {
+        var frames: [(CGImage, Double)] = []
+        func add(_ u: Demo.Usage, open: Bool = true, style: MenuBarStyle = .badges,
+                 alert: (String, String)? = nil, hold: Double) {
+            let scene = DemoScene(usage: u, open: open, style: style, alert: alert)
+            if let img = Snapshot.render(scene, dark: true, scale: 1.5, settle: 0.2)?.cgImage {
+                frames.append((img, hold))
+            }
+        }
+        let clock = { (s: TimeInterval) in Fmt.clock(Date().addingTimeInterval(s)) }
+
+        add(usage(healthy), hold: 1.8)
+        for i in 1...10 { add(usage(mix(healthy, tight, Double(i) / 10)), hold: 0.08) }
+        add(usage(tight), hold: 2.6)
+        add(usage(tight), open: false,
+            alert: ("5-hour limit running low", "14% left · resets \(clock(tight.sessionReset))"), hold: 2.4)
+        for i in 1...5 { add(usage(mix(tight, limited, Double(i) / 6)), hold: 0.08) }
+        add(usage(limited, blocked: true), hold: 2.6)
+        add(usage(back), open: false, alert: ("5-hour limit is back", "100% available"), hold: 2.2)
+        for style in MenuBarStyle.allCases { add(usage(back), open: false, style: style, hold: 1.1) }
+
+        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "com.compuserve.gif" as CFString,
+                                                         frames.count, nil) else { return }
+        CGImageDestinationSetProperties(dest, [kCGImagePropertyGIFDictionary:
+            [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+        for (img, hold) in frames {
+            CGImageDestinationAddImage(dest, img, [kCGImagePropertyGIFDictionary:
+                [kCGImagePropertyGIFDelayTime: hold, kCGImagePropertyGIFUnclampedDelayTime: hold]] as CFDictionary)
+        }
+        CGImageDestinationFinalize(dest)
+        print("wrote \(url.lastPathComponent) \(frames.count) frames")
+    }
+}
+
+/// A desktop corner: wallpaper, a menu bar with Claudius in it, and either the
+/// open panel hanging from it or a notification banner.
+struct DemoScene: View {
+    let usage: Demo.Usage
+    let open: Bool
+    let style: MenuBarStyle
+    let alert: (String, String)?
+
+    var body: some View {
+        let model = UsageModel(live: false, history: usage.history)
+        model.windows = usage.windows
+        model.menuBarStyle = style
+        return ZStack(alignment: .topTrailing) {
+            LinearGradient(colors: [Color(red: 0.10, green: 0.09, blue: 0.14),
+                                    Color(red: 0.24, green: 0.14, blue: 0.10)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            VStack(alignment: .trailing, spacing: 6) {
+                HStack(spacing: 14) {
+                    Image(systemName: "apple.logo")
+                    Text("Finder").fontWeight(.bold)
+                    Text("File")
+                    Text("Edit")
+                    Text("View")
+                    Spacer()
+                    Image(nsImage: model.menuBarImage)
+                        .padding(.horizontal, 4)
+                        .background(RoundedRectangle(cornerRadius: 5)
+                            .fill(Color.white.opacity(open ? 0.18 : 0)))
+                    Image(systemName: "wifi")
+                    Image(systemName: "battery.75percent")
+                    Text("Mon 9:41")
+                }
+                .font(.system(size: 13))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .frame(height: 26)
+                .background(Color.black.opacity(0.35))
+                if open {
+                    Demo.popover(usage)
+                        .modifier(PopoverCard(dark: true))
+                        .compositingGroup()   // one shadow for the card, not one per glyph
+                        .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
+                        .padding(.trailing, 108)
+                }
+            }
+            if let alert {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(nsImage: NSApplication.shared.applicationIconImage)
+                        .resizable().interpolation(.high).frame(width: 34, height: 34)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(alert.0).font(.system(size: 13, weight: .semibold))
+                            Spacer()
+                            Text("now").font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                        Text(alert.1).font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(12)
+                .frame(width: 330)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(white: 0.2)))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                .compositingGroup()
+                .shadow(color: .black.opacity(0.4), radius: 14, y: 6)
+                .padding(.top, 36)
+                .padding(.trailing, 12)
+            }
+        }
+        .frame(width: 600, height: 700, alignment: .top)
     }
 }

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claudius — Claude Code usage limits in your Mac menu bar</title>
+<meta name="description" content="Free macOS menu bar app that shows your Claude Code 5-hour and weekly usage limits, forecasts when you'll run out, alerts you before you hit the limit, and ranks which sessions used the most. Open source, 100% local.">
+<link rel="canonical" href="https://abd-k.github.io/claudius-claude-code-usage/">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Claudius — Claude Code usage limits in your Mac menu bar">
+<meta property="og:description" content="See your 5-hour and weekly Claude Code limits at a glance, know when you'll run out, and get alerted before you do. Free and open source.">
+<meta property="og:url" content="https://abd-k.github.io/claudius-claude-code-usage/">
+<meta property="og:image" content="https://abd-k.github.io/claudius-claude-code-usage/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://abd-k.github.io/claudius-claude-code-usage/social-preview.png">
+<meta name="color-scheme" content="dark light">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Claudius",
+  "description": "macOS menu bar app that shows Claude Code 5-hour and weekly usage limits, run-out forecasts, limit alerts and per-session consumption.",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS 13 or later",
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+  "license": "https://opensource.org/licenses/MIT",
+  "downloadUrl": "https://github.com/Abd-K/claudius-claude-code-usage#install",
+  "codeRepository": "https://github.com/Abd-K/claudius-claude-code-usage",
+  "image": "https://abd-k.github.io/claudius-claude-code-usage/popover.png"
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "How do I check my Claude Code usage limits?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Claudius shows the same numbers as Claude Code's /usage command, always on in your Mac menu bar: how much of your 5-hour and weekly limits is left, and when each resets. The bundled claude-usage command prints the same data in the terminal."}},
+    {"@type": "Question", "name": "When does the Claude Code 5-hour limit reset?",
+     "acceptedAnswer": {"@type": "Answer", "text": "The 5-hour window starts with the first message you send and resets five hours later. Claudius shows the countdown and exact reset time, and can start the next window automatically the minute the last one resets."}},
+    {"@type": "Question", "name": "How do I see my Claude weekly limit on Pro or Max?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Claudius shows how much of the weekly limit is left, the reset day and time, today's usage, and an even per-day budget for the rest of the week, plus model-specific weekly limits when your plan has them."}},
+    {"@type": "Question", "name": "Will I hit my Claude Code limit before it resets?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Claudius projects your pace forward. If you'll run out before the reset it shows the time you'll run out and sends a running-low alert at 20% left; if you'll make it, it stays quiet."}},
+    {"@type": "Question", "name": "Do I need to log in to use Claudius?",
+     "acceptedAnswer": {"@type": "Answer", "text": "No. Claudius reads the sign-in Claude Code already stores in your macOS Keychain and never sees your credentials. Nothing leaves your Mac except the call to Anthropic's own usage endpoint."}}
+  ]
+}
+</script>
+<style>
+  :root {
+    --bg: #0e0d12; --bg2: #17151d; --card: #1d1b24; --line: rgba(255,255,255,.09);
+    --text: #f2f1f5; --muted: #a9a6b3; --dim: #77737f;
+    --green: #30d158; --orange: #ff9f0a; --red: #ff453a;
+    --glow: radial-gradient(60% 50% at 70% 0%, rgba(255,159,10,.16), transparent 70%),
+            radial-gradient(50% 40% at 15% 10%, rgba(48,209,88,.10), transparent 70%);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f5f8; --bg2: #ffffff; --card: #ffffff; --line: rgba(0,0,0,.08);
+      --text: #17151d; --muted: #5d5966; --dim: #8a8693;
+      --glow: radial-gradient(60% 50% at 70% 0%, rgba(255,159,10,.14), transparent 70%),
+              radial-gradient(50% 40% at 15% 10%, rgba(48,209,88,.10), transparent 70%);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  nav { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; text-decoration: none; }
+  .brand img { width: 30px; height: 30px; }
+  .gh { font-size: 14px; color: var(--muted); text-decoration: none; border: 1px solid var(--line); padding: 7px 14px; border-radius: 999px; }
+  .gh:hover { color: var(--text); }
+  header { background: var(--glow); }
+  .hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; padding: 56px 0 72px; }
+  .eyebrow { color: var(--orange); font-weight: 600; font-size: 14px; letter-spacing: .02em; }
+  h1 { font-size: clamp(36px, 5vw, 56px); line-height: 1.05; letter-spacing: -.025em; margin: 12px 0 18px; }
+  .lede { color: var(--muted); font-size: 19px; max-width: 34em; margin: 0 0 28px; }
+  .install { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 12px 12px 16px; max-width: 460px; }
+  .install code { font: 15px/1.4 ui-monospace, "SF Mono", Menlo, monospace; flex: 1; overflow-x: auto; white-space: nowrap; }
+  .install code span { color: var(--dim); user-select: none; }
+  .copy { border: 0; border-radius: 8px; background: var(--text); color: var(--bg); font-weight: 600; font-size: 13px;
+    padding: 8px 12px; cursor: pointer; }
+  .meta { color: var(--dim); font-size: 13px; margin-top: 12px; }
+  .meta a { color: var(--muted); }
+  .demo { justify-self: center; width: 100%; max-width: 480px; border-radius: 16px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,.45); border: 1px solid var(--line); }
+  .demo img { display: block; width: 100%; height: auto; }
+  section { padding: 72px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: clamp(26px, 3.4vw, 36px); letter-spacing: -.02em; margin: 0 0 10px; }
+  .sub { color: var(--muted); margin: 0 0 36px; max-width: 40em; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+  .card .dot { width: 10px; height: 10px; border-radius: 50%; margin-bottom: 14px; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; align-items: start; }
+  .shots figure { margin: 0; }
+  .shots img { width: 100%; height: auto; display: block; border-radius: 14px; border: 1px solid var(--line); }
+  .shots figcaption { color: var(--muted); font-size: 14px; margin-top: 10px; text-align: center; }
+  .privacy { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+  .privacy ul { margin: 0; padding-left: 20px; color: var(--muted); }
+  .privacy li { margin: 6px 0; }
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; margin-bottom: 10px; }
+  summary { cursor: pointer; font-weight: 600; }
+  details p { color: var(--muted); margin: 10px 0 0; }
+  footer { border-top: 1px solid var(--line); padding: 32px 0 48px; color: var(--dim); font-size: 14px; }
+  footer .row { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; padding-top: 24px; }
+    .grid, .shots, .privacy { grid-template-columns: 1fr; }
+    .shots figure { max-width: 360px; margin: 0 auto; }
+  }
+  @media (max-width: 480px) {
+    .wrap { padding: 0 16px; }
+    .install code { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <nav>
+      <a class="brand" href="./"><img src="icon.png" alt="">Claudius</a>
+      <a class="gh" href="https://github.com/Abd-K/claudius-claude-code-usage">★ Star on GitHub</a>
+    </nav>
+    <div class="hero">
+      <div>
+        <div class="eyebrow">Free · open source · macOS</div>
+        <h1>Your Claude Code limits, right in the menu bar.</h1>
+        <p class="lede">See your 5-hour and weekly limits at a glance, know when you'll run out before it happens, and get told the minute you're back.</p>
+        <div class="install">
+          <code id="cmd"><span>$ </span>brew install abd-k/tap/claudius</code>
+          <button class="copy" type="button" data-copy="brew install abd-k/tap/claudius && claudius">Copy</button>
+        </div>
+        <div class="meta">Then run <code>claudius</code> · macOS 13+ · Claude Pro &amp; Max · <a href="https://github.com/Abd-K/claudius-claude-code-usage#install">install from source</a></div>
+      </div>
+      <div class="demo"><img src="demo.gif" width="900" height="1050" alt="Claudius demo: the menu bar opens a panel whose 5-hour and weekly rings drain until a run-out forecast appears, then a running-low alert, a limited banner, and a limit-is-back alert."></div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="wrap">
+      <h2>Never get surprised by a rate limit again</h2>
+      <p class="sub">Everything Claude Code's <code>/usage</code> shows, always on — plus the answers it doesn't give you.</p>
+      <div class="grid">
+        <div class="card"><div class="dot" style="background:var(--red)"></div><h3>Run-out forecast</h3><p>"out ~8:07 pm" appears the moment your pace means you'll hit the limit before it resets.</p></div>
+        <div class="card"><div class="dot" style="background:var(--green)"></div><h3>Weekly budget</h3><p>Today's usage and an even per-day budget to last until the weekly reset, on a trend line of your week.</p></div>
+        <div class="card"><div class="dot" style="background:var(--orange)"></div><h3>Limit alerts</h3><p>Native notifications when a limit runs low, when you hit it, and when it's back.</p></div>
+        <div class="card"><div class="dot" style="background:#64d2ff"></div><h3>What's eating your quota</h3><p>Sessions ranked by their share of your weekly limit, over the last 5 hours, day, week or all time.</p></div>
+        <div class="card"><div class="dot" style="background:#bf5af2"></div><h3>Cache keep-alive</h3><p>Keep a long chat's prompt cache warm so it resumes fast — and never waste usage warming a dead one.</p></div>
+        <div class="card"><div class="dot" style="background:var(--muted)"></div><h3>Your menu bar, your way</h3><p>Badges, rings or plain numbers. Auto-refresh starts a fresh 5-hour window the minute the last resets.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Tells you what to do next</h2>
+      <p class="sub">Quiet when you're fine. Specific when you're not.</p>
+      <div class="shots">
+        <figure><img src="popover-tight.png" loading="lazy" alt="Claudius when usage is tight: red 5-hour ring with an 'out ~8:07 pm' forecast."><figcaption>Running hot — when you'll run out</figcaption></figure>
+        <figure><img src="popover-limited.png" loading="lazy" alt="Claudius when limited: a 'Limited · back at 8:25 pm' banner with a countdown."><figcaption>Limited — exactly when you're back</figcaption></figure>
+        <figure><img src="consumption.png" loading="lazy" alt="Claudius consumption view: sessions ranked by share of the weekly limit and API-equivalent cost."><figcaption>Consumption — which chats used the most</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap privacy">
+      <div>
+        <h2>100% local. No account.</h2>
+        <p class="sub" style="margin:0">Claudius reads the sign-in Claude Code already keeps on your Mac. It never sees your password, has no server, and sends no telemetry.</p>
+      </div>
+      <ul>
+        <li>Token read from your macOS Keychain, where Claude Code stores it</li>
+        <li>Session details read from your local <code>~/.claude</code> transcripts</li>
+        <li>The only network call is to Anthropic's own usage endpoint</li>
+        <li>MIT-licensed — read every line on GitHub</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>FAQ</h2>
+      <details><summary>How do I check my Claude Code usage limits?</summary><p>Claudius shows the same numbers as Claude Code's <code>/usage</code> command, always on in your menu bar: how much of your 5-hour and weekly limits is left, and when each resets. The bundled <code>claude-usage</code> command prints the same data in the terminal.</p></details>
+      <details><summary>When does the Claude Code 5-hour limit reset?</summary><p>The 5-hour window starts with the first message you send and resets five hours later. Claudius shows the countdown and the exact reset time, and can start the next window automatically the minute the last one resets.</p></details>
+      <details><summary>How do I see my Claude weekly limit on Pro or Max?</summary><p>Claudius shows how much of the weekly limit is left, the reset day and time, today's usage, and an even per-day budget for the rest of the week — plus model-specific weekly limits when your plan has them.</p></details>
+      <details><summary>Will I hit my Claude Code limit before it resets?</summary><p>Claudius projects your pace forward. If you'll run out before the reset it shows when, and sends a running-low alert at 20% left. If you'll make it, it stays quiet.</p></details>
+      <details><summary>Do I need to log in?</summary><p>No. Claudius reads the sign-in Claude Code already stores in your Keychain. If that ever expires, a Sign in button runs Claude Code's own login and Claudius picks it up automatically.</p></details>
+      <details><summary>Is there a Windows or Linux version?</summary><p>Not yet — Claudius is a native macOS app.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap row">
+    <span>Claudius · MIT license · Unofficial; not affiliated with Anthropic.</span>
+    <a href="https://github.com/Abd-K/claudius-claude-code-usage">GitHub</a>
+  </div>
+</footer>
+
+<script>
+  document.querySelectorAll('.copy').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
+      try { navigator.clipboard.writeText(b.dataset.copy).then(done, function () {}); } catch (e) {}
+    });
+  });
+</script>
+</body>
+</html>

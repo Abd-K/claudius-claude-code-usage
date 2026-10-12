@@ -7,17 +7,16 @@
   <img src="https://img.shields.io/badge/SwiftUI-native-orange?logo=swift&logoColor=white" alt="Native SwiftUI">
   <img src="https://img.shields.io/badge/data-100%25%20local-2ea44f" alt="100% local">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT license"></a>
-  <a href="https://github.com/Abd-K/Claudius/releases"><img src="https://img.shields.io/github/v/release/Abd-K/Claudius?color=blue" alt="Latest release"></a>
-  <a href="https://github.com/Abd-K/Claudius/stargazers"><img src="https://img.shields.io/github/stars/Abd-K/Claudius?style=flat&color=yellow" alt="GitHub stars"></a>
+  <a href="https://github.com/Abd-K/claudius-claude-code-usage/releases"><img src="https://img.shields.io/github/v/release/Abd-K/claudius-claude-code-usage?color=blue" alt="Latest release"></a>
+  <a href="https://github.com/Abd-K/claudius-claude-code-usage/stargazers"><img src="https://img.shields.io/github/stars/Abd-K/claudius-claude-code-usage?style=flat&color=yellow" alt="GitHub stars"></a>
 </p>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: light)" srcset="docs/popover-light.png">
-    <img src="docs/popover.png" width="340"
-         alt="Claudius panel: rings for the 5-hour and weekly limits with reset countdowns, this week's usage trend with today's share and a daily budget, a Fable limit bar, and a list of Claude Code sessions with cache warmth.">
-  </picture>
+  <img src="docs/demo.gif" width="480"
+       alt="Claudius demo: the menu bar badges open a panel whose 5-hour and weekly rings drain until a run-out forecast appears, a 'limit running low' alert, a 'Limited · back at' banner, a 'limit is back' alert, and the three menu-bar styles.">
 </p>
+
+<p align="center"><a href="https://abd-k.github.io/claudius-claude-code-usage/"><strong>Website</strong></a> · <a href="#install"><strong>Install</strong></a> · <a href="#faq"><strong>FAQ</strong></a></p>
 
 Claudius is a lightweight, open-source **macOS menu bar app** for [Claude Code](https://claude.com/claude-code) power users on **Pro and Max plans**. Your **5-hour session** and **weekly** limits sit in the menu bar; one click shows when each resets, **when you'll run out at your current pace**, how much you can spend per day to last the week, and which sessions ate the most. It reads the sign-in Claude Code already keeps on your Mac — no login, no account, no telemetry.
 
@@ -25,14 +24,23 @@ Claudius is a lightweight, open-source **macOS menu bar app** for [Claude Code](
 
 ## Install
 
-Requires macOS 13+, the Xcode command-line tools (`xcode-select --install`), `python3`, and a signed-in Claude Code CLI.
+With [Homebrew](https://brew.sh) — builds it on your Mac, no downloads to unblock:
 
 ```sh
-git clone https://github.com/Abd-K/Claudius.git
-cd Claudius && ./install.sh
+brew install abd-k/tap/claudius
+claudius
 ```
 
-That installs the `claude-usage` backend to `~/.local/bin`, builds Claudius into `/Applications` and launches it. Re-run it to upgrade.
+`claudius` puts the app in your Applications folder and starts it; run it again after `brew upgrade` to switch versions.
+
+Or from source:
+
+```sh
+git clone https://github.com/Abd-K/claudius-claude-code-usage.git
+cd claudius-claude-code-usage && ./install.sh
+```
+
+Requires macOS 13+, the Xcode command-line tools (`xcode-select --install`), `python3`, and a signed-in Claude Code CLI.
 
 ## Why Claudius?
 
@@ -100,8 +108,10 @@ The macOS app (SwiftUI, `MenuBarExtra`) shells out to a small Python backend, `c
 
 The app keeps a week of its own readings in `~/Library/Application Support/Claudius` to draw the trend — the endpoint only reports the present. Because the token lives only in the Keychain and the app runs the `claude` CLI for keep-alive, it **can't be sandboxed** for the Mac App Store.
 
+## FAQ
+
 <details>
-<summary><strong>How do I check my Claude Code usage without opening a dashboard?</strong></summary>
+<summary><strong>How do I check my Claude Code usage limits?</strong></summary>
 
 Claudius surfaces the same numbers as the in-app `/usage` command, but always-on in your menu bar. If you prefer the terminal, the bundled `claude-usage` CLI prints the same data:
 
@@ -111,6 +121,41 @@ claude-usage check      # prints true/false — are you rate-limited right now?
 claude-usage sessions   # recent sessions + cache warmth
 claude-usage cost --since 1d   # which sessions consumed the most today
 ```
+
+</details>
+
+<details>
+<summary><strong>When does the Claude Code 5-hour limit reset?</strong></summary>
+
+The 5-hour window starts with the first message you send and resets five hours later — it doesn't run on a fixed clock. Claudius shows the countdown and the exact reset time, and says **idle** when no window is open. Turn on **Auto-refresh 5h limit** and it starts the next window the minute the last one resets, so it's already counting down when you come back.
+
+</details>
+
+<details>
+<summary><strong>How do I see my Claude weekly limit on Pro or Max?</strong></summary>
+
+The weekly limit resets at a fixed time each week. Claudius shows how much is left, the reset day and time, what you've used today, and an even per-day budget for the rest of the week — plus model-specific weekly limits (such as Fable) when your plan has them.
+
+</details>
+
+<details>
+<summary><strong>Will I hit my Claude Code limit before it resets?</strong></summary>
+
+Claudius projects your pace so far forward. If it runs a limit dry before the reset, the panel shows **out ~8:07 pm** (orange, red inside the last hour) and you get a **running low** alert at 20% left. If you'll make it, it stays quiet.
+
+</details>
+
+<details>
+<summary><strong>Does it work with Claude Pro and Claude Max?</strong></summary>
+
+Yes — any plan whose limits Claude Code's `/usage` command shows. All it needs is the Claude Code CLI signed in on your Mac.
+
+</details>
+
+<details>
+<summary><strong>Is there a Windows or Linux version?</strong></summary>
+
+Not yet — Claudius is a native macOS app.
 
 </details>
 
