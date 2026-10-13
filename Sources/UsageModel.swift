@@ -13,7 +13,9 @@ final class UsageModel: ObservableObject {
     /// that needs a human to log in.
     @Published var needsSignIn = false
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
-    @Published var autoAnchor = (UserDefaults.standard.object(forKey: "autoAnchor") as? Bool) ?? true {
+    /// Off until the user turns it on: each refresh spends a sliver of their quota,
+    /// which nobody should find happening by default.
+    @Published var autoAnchor = (UserDefaults.standard.object(forKey: "autoAnchor") as? Bool) ?? false {
         didSet {
             UserDefaults.standard.set(autoAnchor, forKey: "autoAnchor")
             scheduleAutoAnchor()

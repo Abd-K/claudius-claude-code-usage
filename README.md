@@ -69,7 +69,7 @@ Requires macOS 13+, the Xcode command-line tools (`xcode-select --install`), `py
 | **Reset countdowns** | Countdown plus clock time for every limit, model-scoped ones (e.g. Fable) included |
 | **Per-session consumption** | Share of your weekly limit + API-equivalent cost, by 5h / 1d / 1w / all |
 | **Cache warmth + keep-alive** | Per session; never warms a cold cache |
-| **Auto-refresh 5h limit** | Starts a fresh 5-hour window the minute the last one resets |
+| **Auto-refresh 5h limit** | Optional — starts a fresh 5-hour window the minute the last one resets |
 | **CLI included** | `claude-usage` works standalone in scripts and CI |
 
 ## What everything means
@@ -90,7 +90,7 @@ Requires macOS 13+, the Xcode command-line tools (`xcode-select --install`), `py
 - **This week** — usage so far against a shaded 10–20%-a-day band, with **today**'s share and an even **%/day** budget for what's left.
 - **Sessions** — your recent Claude Code chats and how long each stays fast to resume. The **🔥 flame** keeps one warm automatically; **↻** refreshes it now (uses a little quota).
 - **Consumption** — which chats used the most of your allowance.
-- **Auto-refresh 5h limit** — starts a fresh 5-hour window the moment the current one resets, so you're not left waiting on it.
+- **Auto-refresh 5h limit** — off until you turn it on. When on, it starts a fresh 5-hour window the moment the current one resets, so you're not left waiting on it.
 
 <p align="center">
   <img src="docs/consumption.png" width="280"
@@ -107,6 +107,28 @@ The macOS app (SwiftUI, `MenuBarExtra`) shells out to a small Python backend, `c
 3. parses your local `~/.claude` transcripts for per-session cache warmth and consumption — deduped by message id, so streaming rewrites and resumed sessions aren't double-counted.
 
 The app keeps a week of its own readings in `~/Library/Application Support/Claudius` to draw the trend — the endpoint only reports the present. Because the token lives only in the Keychain and the app runs the `claude` CLI for keep-alive, it **can't be sandboxed** for the Mac App Store.
+
+## Privacy & security
+
+No server, no account, no analytics. Everything Claudius does is in this repo, and Homebrew builds it from this source on your Mac.
+
+**What it reads**
+- Your Claude Code sign-in token, from the Keychain entry Claude Code created (`Claude Code-credentials`), using macOS's own `security` tool — [code](https://github.com/Abd-K/claudius-claude-code-usage/blob/84549bd520fd5e45fe5814c24eb875c84d260a73/claude-usage#L121-L135). It never changes or copies it.
+- Your local Claude Code transcripts in `~/.claude/projects` — timestamps, token counts and titles, for cache warmth and consumption — plus session names from `~/.claude/sessions` and the Claude desktop app's session list — [code](https://github.com/Abd-K/claudius-claude-code-usage/blob/84549bd520fd5e45fe5814c24eb875c84d260a73/claude-usage#L486-L640).
+
+**What it sends**
+- Your token to Anthropic's usage endpoint (`api.anthropic.com/api/oauth/usage`) — the same data `/usage` shows, at most once every two minutes — [code](https://github.com/Abd-K/claudius-claude-code-usage/blob/84549bd520fd5e45fe5814c24eb875c84d260a73/claude-usage#L226-L245).
+- Nothing else, to anyone.
+
+**When it runs Anthropic's `claude` CLI** — each time a one-line "reply with just: ok" message that uses a sliver of quota:
+- **Auto-refresh 5h limit** (off by default) and the ⚡ button: one Haiku message to start a 5-hour window — [code](https://github.com/Abd-K/claudius-claude-code-usage/blob/84549bd520fd5e45fe5814c24eb875c84d260a73/claude-usage#L173-L198).
+- **Keep warm** (🔥, off for every session until you turn it on) and ↻: one message to that session to keep its cache warm; it refuses sessions that are already cold — [code](https://github.com/Abd-K/claudius-claude-code-usage/blob/84549bd520fd5e45fe5814c24eb875c84d260a73/claude-usage#L883-L941).
+- **Expired sign-in**: one Haiku message so Claude Code refreshes its own token, at most every 30 minutes — [code](https://github.com/Abd-K/claudius-claude-code-usage/blob/84549bd520fd5e45fe5814c24eb875c84d260a73/claude-usage#L200-L207).
+- **Sign in** button: opens Terminal running `claude auth login` — Anthropic's own login.
+
+**What it stores, on your Mac only**
+- `~/.local/state/claude-usage/` — the last usage reading, a consumption cache, and a log of auto-refresh attempts.
+- `~/Library/Application Support/Claudius/history.json` — a week of usage percentages for the trend line.
 
 ## FAQ
 
